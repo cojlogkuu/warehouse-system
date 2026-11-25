@@ -1,8 +1,8 @@
+import { Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { AppModule } from './app.module'
-
-const DEFAULT_PORT = 3000
-const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
+import type { EnvironmentVariables } from './config/environment'
 
 /**
  * Creates the Nest application, applies global settings and starts the HTTP server.
@@ -11,9 +11,21 @@ const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule)
+  const config = app.get<ConfigService<EnvironmentVariables, true>>(ConfigService)
   app.setGlobalPrefix('api')
-  app.enableCors({ origin: process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGIN })
-  await app.listen(process.env.PORT ?? DEFAULT_PORT)
+  app.enableCors({ origin: config.get('CORS_ORIGIN', { infer: true }) })
+  app.enableShutdownHooks()
+  await app.listen(config.get('PORT', { infer: true }))
 }
 
-void bootstrap()
+/**
+ * Logs why the application could not start and ends the process with an error code.
+ *
+ * @param error - Reason of the failed startup.
+ */
+function failStartup(error: unknown): void {
+  new Logger('Bootstrap').error(error instanceof Error ? error.message : 'Unknown startup error')
+  process.exit(1)
+}
+
+bootstrap().catch(failStartup)

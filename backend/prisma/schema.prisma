@@ -1,0 +1,321 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Role of a user; decides what the user may do.
+enum Role {
+  ADMIN
+  MANAGER
+  STOREKEEPER
+  ACCOUNTANT
+
+  @@map("role")
+}
+
+/// Business role of a counterparty.
+enum CounterpartyType {
+  SUPPLIER
+  CUSTOMER
+  BOTH
+
+  @@map("counterparty_type")
+}
+
+/// Kind of a stock document.
+enum DocumentType {
+  RECEIPT
+  SHIPMENT
+  WRITE_OFF
+
+  @@map("document_type")
+}
+
+/// Lifecycle status of a stock document.
+enum DocumentStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+
+  @@map("document_status")
+}
+
+/// Reason of a write-off document.
+enum WriteOffReason {
+  DAMAGED
+  EXPIRED
+  LOST
+  SHORTAGE
+  OTHER
+
+  @@map("write_off_reason")
+}
+
+/// Kind of a ledger movement.
+enum MovementType {
+  RECEIPT
+  SHIPMENT
+  WRITE_OFF
+
+  @@map("movement_type")
+}
+
+/// Method of valuing the stock on hand.
+enum ValuationMethod {
+  FIFO
+  WEIGHTED_AVERAGE
+  LAST_PURCHASE_PRICE
+
+  @@map("valuation_method")
+}
+
+/// Kind of an in-app notification.
+enum NotificationType {
+  LOW_STOCK
+
+  @@map("notification_type")
+}
+
+/// Status of an in-app notification.
+enum NotificationStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+
+  @@map("notification_status")
+}
+
+/// User account. Never deleted, only deactivated.
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  /// Always stored in lower case.
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  role         Role
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  refreshTokens             RefreshToken[]
+  createdDocuments          StockDocument[] @relation("StockDocumentCreatedBy")
+  postedDocuments           StockDocument[] @relation("StockDocumentPostedBy")
+  cancelledDocuments        StockDocument[] @relation("StockDocumentCancelledBy")
+  acknowledgedNotifications Notification[]
+
+  @@map("users")
+}
+
+/// Refresh session of a user; only the hash of the token is stored.
+model RefreshToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Product category.
+model Category {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  name        String  @unique
+  description String?
+
+  products Product[]
+
+  @@map("categories")
+}
+
+/// Unit of measure.
+model Unit {
+  id   String @id @default(uuid(7)) @db.Uuid
+  code String @unique
+  name String @unique
+
+  products Product[]
+
+  @@map("units")
+}
+
+/// Supplier, customer or both.
+model Counterparty {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  name      String
+  type      CounterpartyType
+  taxId     String?          @unique @map("tax_id")
+  email     String?
+  phone     String?
+  address   String?
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  products  Product[]
+  documents StockDocument[]
+
+  @@index([type])
+  @@map("counterparties")
+}
+
+/// Catalog item with its cached stock level. Never deleted, only deactivated.
+model Product {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  sku           String   @unique
+  name          String
+  description   String?
+  categoryId    String   @map("category_id") @db.Uuid
+  unitId        String   @map("unit_id") @db.Uuid
+  supplierId    String?  @map("supplier_id") @db.Uuid
+  /// Selling price.
+  price         Decimal  @db.Decimal(14, 2)
+  /// Cache of the ledger: the sum of all quantity deltas of the product.
+  quantity      Decimal  @default(0) @db.Decimal(14, 3)
+  minStockLevel Decimal  @default(0) @map("min_stock_level") @db.Decimal(14, 3)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  category      Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  unit          Unit            @relation(fields: [unitId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  supplier      Counterparty?   @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  documentLines DocumentLine[]
+  movements     StockMovement[]
+  notifications Notification[]
+
+  @@index([categoryId])
+  @@index([unitId])
+  @@index([supplierId])
+  @@map("products")
+}
+
+/// Receipt, shipment or write-off document.
+model StockDocument {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  number         String          @unique
+  type           DocumentType
+  status         DocumentStatus  @default(DRAFT)
+  /// Informational calendar day printed on the document.
+  documentDate   DateTime        @map("document_date") @db.Date
+  counterpartyId String?         @map("counterparty_id") @db.Uuid
+  writeOffReason WriteOffReason? @map("write_off_reason")
+  comment        String?
+  createdById    String          @map("created_by_id") @db.Uuid
+  postedById     String?         @map("posted_by_id") @db.Uuid
+  postedAt       DateTime?       @map("posted_at") @db.Timestamptz(3)
+  cancelledById  String?         @map("cancelled_by_id") @db.Uuid
+  cancelledAt    DateTime?       @map("cancelled_at") @db.Timestamptz(3)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  counterparty Counterparty?   @relation(fields: [counterpartyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy    User            @relation("StockDocumentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  postedBy     User?           @relation("StockDocumentPostedBy", fields: [postedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cancelledBy  User?           @relation("StockDocumentCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  lines        DocumentLine[]
+  movements    StockMovement[]
+
+  @@index([type, status, documentDate])
+  @@index([documentDate])
+  @@index([counterpartyId])
+  @@map("stock_documents")
+}
+
+/// Position of a stock document.
+model DocumentLine {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  documentId String   @map("document_id") @db.Uuid
+  lineNo     Int      @map("line_no")
+  productId  String   @map("product_id") @db.Uuid
+  quantity   Decimal  @db.Decimal(14, 3)
+  unitPrice  Decimal? @map("unit_price") @db.Decimal(14, 2)
+
+  document  StockDocument   @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  movements StockMovement[]
+
+  @@unique([documentId, lineNo])
+  @@index([productId])
+  @@map("document_lines")
+}
+
+/// Immutable entry of the stock ledger, the source of truth for quantities.
+model StockMovement {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  productId      String       @map("product_id") @db.Uuid
+  documentId     String       @map("document_id") @db.Uuid
+  documentLineId String       @map("document_line_id") @db.Uuid
+  type           MovementType
+  quantityDelta  Decimal      @map("quantity_delta") @db.Decimal(14, 3)
+  unitCost       Decimal?     @map("unit_cost") @db.Decimal(14, 2)
+  /// Time of posting or cancellation; the time axis of all reports.
+  occurredAt     DateTime     @map("occurred_at") @db.Timestamptz(3)
+  reversalOfId   String?      @unique @map("reversal_of_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  product      Product        @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  document     StockDocument  @relation(fields: [documentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  documentLine DocumentLine   @relation(fields: [documentLineId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversalOf   StockMovement? @relation("StockMovementReversal", fields: [reversalOfId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversal     StockMovement? @relation("StockMovementReversal")
+
+  @@index([productId, occurredAt, id])
+  @@index([occurredAt])
+  @@index([documentId])
+  @@index([documentLineId])
+  @@map("stock_movements")
+}
+
+/// In-app low-stock alert of a product.
+model Notification {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  type             NotificationType
+  status           NotificationStatus @default(ACTIVE)
+  productId        String             @map("product_id") @db.Uuid
+  message          String
+  quantityAtAlert  Decimal            @map("quantity_at_alert") @db.Decimal(14, 3)
+  minStockLevel    Decimal            @map("min_stock_level") @db.Decimal(14, 3)
+  acknowledgedById String?            @map("acknowledged_by_id") @db.Uuid
+  acknowledgedAt   DateTime?          @map("acknowledged_at") @db.Timestamptz(3)
+  resolvedAt       DateTime?          @map("resolved_at") @db.Timestamptz(3)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  product        Product @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acknowledgedBy User?   @relation(fields: [acknowledgedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([status, createdAt])
+  @@index([productId])
+  @@map("notifications")
+}
+
+/// The single row of system settings (id is always 1).
+model SystemSettings {
+  id                     Int             @id @default(1)
+  companyName            String          @map("company_name")
+  companyAddress         String          @map("company_address")
+  defaultValuationMethod ValuationMethod @default(FIFO) @map("default_valuation_method")
+  lowStockAlertsEnabled  Boolean         @default(true) @map("low_stock_alerts_enabled")
+  updatedAt              DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("system_settings")
+}
+
+/// Last used document number per document type and year.
+model DocumentCounter {
+  type      DocumentType
+  year      Int
+  lastValue Int          @default(0) @map("last_value")
+
+  @@id([type, year])
+  @@map("document_counters")
+}

@@ -11,6 +11,7 @@ dist-ssr/
 build/
 coverage/
 *.tsbuildinfo
+backend/src/generated/
 
 # Environment files
 .env

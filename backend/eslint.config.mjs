@@ -6,7 +6,7 @@ import { defineConfig } from 'eslint/config'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig(
-  { ignores: ['dist', 'node_modules', 'eslint.config.mjs'] },
+  { ignores: ['dist', 'node_modules', 'src/generated', 'eslint.config.mjs'] },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
