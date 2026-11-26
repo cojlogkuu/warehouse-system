@@ -16,7 +16,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
    */
   constructor(config: ConfigService<EnvironmentVariables, true>) {
     const connectionString = config.get('DATABASE_URL', { infer: true })
-    super({ adapter: new PrismaPg({ connectionString }) })
+    // Minimal errors never quote query arguments, so password and token hashes stay out of logs
+    super({ adapter: new PrismaPg({ connectionString }), errorFormat: 'minimal' })
   }
 
   /**

@@ -1,7 +1,38 @@
-import { plainToInstance, Type } from 'class-transformer'
-import { IsInt, IsUrl, Max, Min, validateSync } from 'class-validator'
+import { Transform, Type, plainToInstance } from 'class-transformer'
+import {
+  IsBoolean,
+  IsInt,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+  MinLength,
+  ValidateBy,
+  validateSync,
+} from 'class-validator'
 
 const MAX_PORT = 65535
+/** HS256 keys shorter than the 256 bits of the hash weaken the signature. */
+const MIN_SECRET_LENGTH = 32
+const DEFAULT_ACCESS_TTL_SECONDS = 15 * 60
+const DEFAULT_REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60
+const MAX_TTL_SECONDS = 365 * 24 * 60 * 60
+
+/**
+ * Requires a variable to differ from another one.
+ *
+ * @param other - Name of the variable to compare with.
+ * @returns The property decorator.
+ */
+function DiffersFrom(other: keyof EnvironmentVariables): PropertyDecorator {
+  return ValidateBy({
+    name: 'differsFrom',
+    validator: {
+      validate: (value, args) => value !== (args?.object as EnvironmentVariables)[other],
+      defaultMessage: () => `$property must differ from ${other}`,
+    },
+  })
+}
 
 /**
  * Environment variables used by the application, validated once at startup.
@@ -24,6 +55,38 @@ export class EnvironmentVariables {
     { message: '$property is required and must be a postgresql:// connection string' },
   )
   DATABASE_URL: string
+
+  /** Secret that signs the access tokens; has no default. */
+  @IsString()
+  @MinLength(MIN_SECRET_LENGTH)
+  JWT_ACCESS_SECRET: string
+
+  /** Secret that signs the refresh tokens; has no default. */
+  @IsString()
+  @MinLength(MIN_SECRET_LENGTH)
+  @DiffersFrom('JWT_ACCESS_SECRET')
+  JWT_REFRESH_SECRET: string
+
+  /** Lifetime of an access token in seconds. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_TTL_SECONDS)
+  JWT_ACCESS_TTL_SECONDS = DEFAULT_ACCESS_TTL_SECONDS
+
+  /** Lifetime of a refresh token (and of its cookie) in seconds. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_TTL_SECONDS)
+  JWT_REFRESH_TTL_SECONDS = DEFAULT_REFRESH_TTL_SECONDS
+
+  /** Whether the refresh cookie is sent over HTTPS only; disable for local development. */
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean({ message: '$property must be true or false' })
+  COOKIE_SECURE = true
 }
 
 /**
