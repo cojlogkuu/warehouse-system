@@ -83,7 +83,7 @@ export class UsersRepository {
    * @param transaction - Client of the surrounding transaction.
    * @returns The identifiers of the active administrators.
    */
-  async lockActiveAdministratorIds(transaction: Prisma.TransactionClient): Promise<string[]> {
+  async lockActiveAdmins(transaction: Prisma.TransactionClient): Promise<string[]> {
     const rows = await transaction.$queryRaw<{ id: string }[]>`
       SELECT id FROM users WHERE role = ${Role.ADMIN}::role AND is_active ORDER BY id FOR UPDATE`
     return rows.map((row) => row.id)

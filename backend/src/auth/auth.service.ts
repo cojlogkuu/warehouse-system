@@ -45,21 +45,24 @@ export class AuthService {
   /**
    * Opens a new session for an active user.
    *
-   * @param dto - E-mail address and password.
+   * @param credentials - E-mail address and password.
    * @returns The tokens of the session.
    * @throws UnauthorizedException if the address is unknown, the password is wrong or the
    *   account is deactivated.
    */
-  async login(dto: LoginDto): Promise<AuthTokensDto> {
-    const user = await this.users.findByEmail(dto.email)
-    const passwordMatches = await this.passwords.verify(dto.password, user?.passwordHash)
+  async login(credentials: LoginDto): Promise<AuthTokensDto> {
+    const user = await this.users.findUserByEmail(credentials.email)
+    const passwordMatches = await this.passwords.verifyPassword(
+      credentials.password,
+      user?.passwordHash,
+    )
     if (!user || !passwordMatches || !user.isActive) {
       throw new UnauthorizedException(INVALID_CREDENTIALS)
     }
     return this.prisma.$transaction(async (transaction) => {
       // The account may have been deactivated or its password reset during the comparison
-      const current = await this.users.lockById(user.id, transaction)
-      if (!current?.isActive || current.passwordHash !== user.passwordHash) {
+      const lockedUser = await this.users.lockUserById(user.id, transaction)
+      if (!lockedUser?.isActive || lockedUser.passwordHash !== user.passwordHash) {
         throw new UnauthorizedException(INVALID_CREDENTIALS)
       }
       await this.refreshTokens.deleteExpired(user.id, new Date(), transaction)
@@ -76,31 +79,33 @@ export class AuthService {
    * @throws UnauthorizedException if the token is invalid, expired, revoked or unknown, or its
    *   user is deactivated.
    */
-  async refresh(refreshToken: string): Promise<AuthTokensDto> {
+  async refreshSession(refreshToken: string): Promise<AuthTokensDto> {
     const { sub: userId } = await this.tokens.verifyRefreshToken(refreshToken)
-    const tokenHash = this.tokens.hash(refreshToken)
-    const outcome = await this.prisma.$transaction(async (transaction): Promise<RefreshOutcome> => {
-      // The lock makes parallel requests with the same token run one after the other
-      const user = await this.users.lockById(userId, transaction)
-      const session = await this.refreshTokens.findByHash(tokenHash, transaction)
-      if (!user || session?.userId !== user.id) {
+    const tokenHash = this.tokens.hashToken(refreshToken)
+    const refreshOutcome = await this.prisma.$transaction(
+      async (transaction): Promise<RefreshOutcome> => {
+        // The lock makes parallel requests with the same token run one after the other
+        const user = await this.users.lockUserById(userId, transaction)
+        const session = await this.refreshTokens.findByHash(tokenHash, transaction)
+        if (!user || session?.userId !== user.id) {
+          return { kind: 'invalid' }
+        }
+        const now = new Date()
+        const isUsable = !session.revokedAt && user.isActive && session.expiresAt > now
+        if (isUsable && (await this.refreshTokens.revoke(session.id, now, transaction))) {
+          return { kind: 'rotated', tokens: await this.openSession(user.id, transaction) }
+        }
+        if (session.revokedAt || isUsable) {
+          await this.refreshTokens.revokeAllForUser(user.id, now, transaction)
+          return { kind: 'reused' }
+        }
         return { kind: 'invalid' }
-      }
-      const now = new Date()
-      const isUsable = !session.revokedAt && user.isActive && session.expiresAt > now
-      if (isUsable && (await this.refreshTokens.revoke(session.id, now, transaction))) {
-        return { kind: 'rotated', tokens: await this.openSession(user.id, transaction) }
-      }
-      if (session.revokedAt || isUsable) {
-        await this.refreshTokens.revokeAllForUser(user.id, now, transaction)
-        return { kind: 'reused' }
-      }
-      return { kind: 'invalid' }
-    })
-    if (outcome.kind === 'rotated') {
-      return outcome.tokens
+      },
+    )
+    if (refreshOutcome.kind === 'rotated') {
+      return refreshOutcome.tokens
     }
-    if (outcome.kind === 'reused') {
+    if (refreshOutcome.kind === 'reused') {
       this.logger.warn(`Revoked refresh token presented; all sessions of user ${userId} ended`)
     }
     throw new UnauthorizedException(INVALID_REFRESH_TOKEN)
@@ -115,7 +120,7 @@ export class AuthService {
    */
   async logout(userId: string, refreshToken: string): Promise<void> {
     if (refreshToken) {
-      await this.refreshTokens.revokeOwn(userId, this.tokens.hash(refreshToken), new Date())
+      await this.refreshTokens.revokeOwn(userId, this.tokens.hashToken(refreshToken), new Date())
     }
   }
 
@@ -123,18 +128,22 @@ export class AuthService {
    * Lets a user replace their own password. All their sessions end, the current one included.
    *
    * @param userId - The authenticated user.
-   * @param dto - Current and new password.
+   * @param passwordChange - Current and new password.
    * @returns A promise that resolves once the password is set.
    * @throws BadRequestException if the current password is wrong.
    */
-  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
-    const user = await this.users.findById(userId)
-    if (!(await this.passwords.verify(dto.currentPassword, user?.passwordHash))) {
+  async changePassword(userId: string, passwordChange: ChangePasswordDto): Promise<void> {
+    const user = await this.users.findUserById(userId)
+    if (
+      !(await this.passwords.verifyPassword(passwordChange.currentPassword, user?.passwordHash))
+    ) {
       // Not 401: the access token is fine, so the client must not try to refresh it
       throw new BadRequestException('The current password is incorrect')
     }
-    const reset = Object.assign(new ResetPasswordDto(), { password: dto.newPassword })
-    await this.users.resetPassword(userId, reset)
+    const newPassword = Object.assign(new ResetPasswordDto(), {
+      password: passwordChange.newPassword,
+    })
+    await this.users.resetPassword(userId, newPassword)
   }
 
   /**
@@ -146,7 +155,7 @@ export class AuthService {
    * @throws UnauthorizedException if the user no longer exists or is deactivated.
    */
   async validatePayload(payload: JwtPayload): Promise<AuthenticatedUser> {
-    const user = await this.users.findById(payload.sub)
+    const user = await this.users.findUserById(payload.sub)
     if (!user?.isActive) {
       throw new UnauthorizedException()
     }
@@ -164,7 +173,7 @@ export class AuthService {
     userId: string,
     transaction: Prisma.TransactionClient,
   ): Promise<AuthTokensDto> {
-    const session = await this.tokens.issue(userId)
+    const session = await this.tokens.issueTokens(userId)
     await this.refreshTokens.create(
       { userId, tokenHash: session.refreshTokenHash, expiresAt: session.refreshExpiresAt },
       transaction,

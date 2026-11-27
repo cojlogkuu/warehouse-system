@@ -13,7 +13,7 @@ const REFRESH_COOKIE_PATH = `/${API_PREFIX}/auth`
  */
 @Injectable()
 export class RefreshCookie {
-  private readonly options: CookieOptions
+  private readonly cookieOptions: CookieOptions
   private readonly maxAge: number
 
   /**
@@ -22,7 +22,7 @@ export class RefreshCookie {
    * @param config - Cookie settings.
    */
   constructor(config: ConfigService<EnvironmentVariables, true>) {
-    this.options = {
+    this.cookieOptions = {
       httpOnly: true,
       sameSite: 'strict',
       secure: config.get('COOKIE_SECURE', { infer: true }),
@@ -37,10 +37,10 @@ export class RefreshCookie {
    * @param request - Request with parsed cookies.
    * @returns The refresh token, or `undefined` if the request carries none.
    */
-  read(request: Request): string | undefined {
+  readToken(request: Request): string | undefined {
     const cookies = request.cookies as Record<string, unknown> | undefined
-    const value = cookies?.[REFRESH_COOKIE_NAME]
-    return typeof value === 'string' && value !== '' ? value : undefined
+    const cookieValue = cookies?.[REFRESH_COOKIE_NAME]
+    return typeof cookieValue === 'string' && cookieValue !== '' ? cookieValue : undefined
   }
 
   /**
@@ -49,8 +49,8 @@ export class RefreshCookie {
    * @param response - Response that hands the token to the browser.
    * @param token - Refresh token.
    */
-  write(response: Response, token: string): void {
-    response.cookie(REFRESH_COOKIE_NAME, token, { ...this.options, maxAge: this.maxAge })
+  writeToken(response: Response, token: string): void {
+    response.cookie(REFRESH_COOKIE_NAME, token, { ...this.cookieOptions, maxAge: this.maxAge })
   }
 
   /**
@@ -58,7 +58,7 @@ export class RefreshCookie {
    *
    * @param response - Response to the client.
    */
-  clear(response: Response): void {
-    response.clearCookie(REFRESH_COOKIE_NAME, this.options)
+  clearToken(response: Response): void {
+    response.clearCookie(REFRESH_COOKIE_NAME, this.cookieOptions)
   }
 }

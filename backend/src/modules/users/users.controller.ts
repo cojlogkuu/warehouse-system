@@ -40,25 +40,25 @@ export class UsersController {
   /**
    * Lists users.
    *
-   * @param query - Conditions of the list.
+   * @param userQuery - Conditions of the list.
    * @returns The matching users.
    */
   @Get()
   @ApiOkResponse({ type: [UserDto] })
-  findAll(@Query() query: UserQueryDto): Promise<UserDto[]> {
-    return this.users.findAll(query)
+  listUsers(@Query() userQuery: UserQueryDto): Promise<UserDto[]> {
+    return this.users.listUsers(userQuery)
   }
 
   /**
    * Creates a user.
    *
-   * @param dto - Data of the new user.
+   * @param newUser - Data of the new user.
    * @returns The created user.
    */
   @Post()
   @ApiCreatedResponse({ type: UserDto })
-  create(@Body() dto: CreateUserDto): Promise<UserDto> {
-    return this.users.create(dto)
+  createUser(@Body() newUser: CreateUserDto): Promise<UserDto> {
+    return this.users.createUser(newUser)
   }
 
   /**
@@ -69,37 +69,40 @@ export class UsersController {
    */
   @Get(':id')
   @ApiOkResponse({ type: UserDto })
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<UserDto> {
-    return this.users.findOne(id)
+  showUser(@Param('id', ParseUUIDPipe) id: string): Promise<UserDto> {
+    return this.users.findPublicUser(id)
   }
 
   /**
    * Changes, deactivates or restores a user.
    *
    * @param id - Identifier of the user.
-   * @param dto - Values to change.
+   * @param userChanges - Values to change.
    * @returns The changed user.
    */
   @Patch(':id')
   @ApiOkResponse({ type: UserDto })
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto): Promise<UserDto> {
-    return this.users.update(id, dto)
+  updateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() userChanges: UpdateUserDto,
+  ): Promise<UserDto> {
+    return this.users.updateUser(id, userChanges)
   }
 
   /**
    * Resets the password of a user.
    *
    * @param id - Identifier of the user.
-   * @param dto - The new password.
+   * @param newPassword - The new password.
    * @returns A promise that resolves once the password is set.
    */
   @Patch(':id/password')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
-  resetPassword(
+  resetUserPassword(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ResetPasswordDto,
+    @Body() newPassword: ResetPasswordDto,
   ): Promise<void> {
-    return this.users.resetPassword(id, dto)
+    return this.users.resetPassword(id, newPassword)
   }
 }

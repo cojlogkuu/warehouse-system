@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import type { Prisma, User } from '../../generated/prisma/client'
 import { Role } from '../../generated/prisma/enums'
 import { PrismaService } from '../../prisma/prisma.service'
-import { isUniqueConstraintViolation } from '../../prisma/prisma.utils'
+import { violatesUniqueConstraint } from '../../prisma/prisma.utils'
 import { PasswordHasher } from './password-hasher'
 import { RefreshTokensRepository } from './refresh-tokens.repository'
 import {
@@ -37,12 +37,12 @@ export class UsersService {
   /**
    * Lists users.
    *
-   * @param query - Conditions the users must meet.
+   * @param userQuery - Conditions the users must meet.
    * @returns The matching users ordered by full name.
    */
-  async findAll(query: UserQueryDto): Promise<UserDto[]> {
-    const users = await this.users.findMany(query)
-    return users.map((user) => UserDto.from(user))
+  async listUsers(userQuery: UserQueryDto): Promise<UserDto[]> {
+    const users = await this.users.findMany(userQuery)
+    return users.map((user) => UserDto.fromRecord(user))
   }
 
   /**
@@ -52,8 +52,8 @@ export class UsersService {
    * @returns The public data of the user.
    * @throws NotFoundException if there is no such user.
    */
-  async findOne(id: string): Promise<UserDto> {
-    return UserDto.from(this.assertFound(await this.users.findById(id)))
+  async findPublicUser(id: string): Promise<UserDto> {
+    return UserDto.fromRecord(this.assertUserFound(await this.users.findById(id)))
   }
 
   /**
@@ -62,7 +62,7 @@ export class UsersService {
    * @param id - Identifier of the user.
    * @returns The user, or `null` if there is none.
    */
-  findById(id: string): Promise<User | null> {
+  findUserById(id: string): Promise<User | null> {
     return this.users.findById(id)
   }
 
@@ -72,7 +72,7 @@ export class UsersService {
    * @param email - Normalized e-mail address.
    * @returns The user, or `null` if there is none.
    */
-  findByEmail(email: string): Promise<User | null> {
+  findUserByEmail(email: string): Promise<User | null> {
     return this.users.findByEmail(email)
   }
 
@@ -84,27 +84,27 @@ export class UsersService {
    * @param transaction - Client of the surrounding transaction.
    * @returns The current state of the user, or `null` if there is none.
    */
-  lockById(id: string, transaction: Prisma.TransactionClient): Promise<User | null> {
+  lockUserById(id: string, transaction: Prisma.TransactionClient): Promise<User | null> {
     return this.users.lockById(id, transaction)
   }
 
   /**
    * Creates an active user.
    *
-   * @param dto - Data of the new user.
+   * @param newUser - Data of the new user.
    * @returns The created user.
    * @throws ConflictException if the e-mail address is already taken.
    */
-  async create(dto: CreateUserDto): Promise<UserDto> {
-    const passwordHash = await this.passwords.hash(dto.password)
+  async createUser(newUser: CreateUserDto): Promise<UserDto> {
+    const passwordHash = await this.passwords.hashPassword(newUser.password)
     try {
       const user = await this.users.create({
-        email: dto.email,
-        fullName: dto.fullName,
-        role: dto.role,
+        email: newUser.email,
+        fullName: newUser.fullName,
+        role: newUser.role,
         passwordHash,
       })
-      return UserDto.from(user)
+      return UserDto.fromRecord(user)
     } catch (error) {
       throw this.translateWriteError(error)
     }
@@ -114,20 +114,20 @@ export class UsersService {
    * Changes a user. A new role or a deactivation ends all sessions of the user.
    *
    * @param id - Identifier of the user.
-   * @param dto - Values to change.
+   * @param userChanges - Values to change.
    * @returns The changed user.
    * @throws NotFoundException if there is no such user.
    * @throws ConflictException if the e-mail address is already taken, or the change would leave
    *   the system without an active administrator.
    */
-  async update(id: string, dto: UpdateUserDto): Promise<UserDto> {
+  async updateUser(id: string, userChanges: UpdateUserDto): Promise<UserDto> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
         // Administrators are locked first: two of them cannot remove each other concurrently
-        const administrators = await this.users.lockActiveAdministratorIds(transaction)
-        const user = this.assertFound(await this.users.lockById(id, transaction))
-        const role = dto.role ?? user.role
-        const isActive = dto.isActive ?? user.isActive
+        const administrators = await this.users.lockActiveAdmins(transaction)
+        const user = this.assertUserFound(await this.users.lockById(id, transaction))
+        const role = userChanges.role ?? user.role
+        const isActive = userChanges.isActive ?? user.isActive
         const stopsAdministering =
           user.role === Role.ADMIN && user.isActive && (role !== Role.ADMIN || !isActive)
         if (stopsAdministering && administrators.every((administrator) => administrator === id)) {
@@ -135,15 +135,20 @@ export class UsersService {
             'The last active administrator cannot be deactivated or given another role',
           )
         }
-        const updated = await this.users.update(
+        const updatedUser = await this.users.update(
           id,
-          { email: dto.email, fullName: dto.fullName, role: dto.role, isActive: dto.isActive },
+          {
+            email: userChanges.email,
+            fullName: userChanges.fullName,
+            role: userChanges.role,
+            isActive: userChanges.isActive,
+          },
           transaction,
         )
         if (role !== user.role || (user.isActive && !isActive)) {
           await this.refreshTokens.revokeAllForUser(id, new Date(), transaction)
         }
-        return UserDto.from(updated)
+        return UserDto.fromRecord(updatedUser)
       })
     } catch (error) {
       throw this.translateWriteError(error)
@@ -154,14 +159,14 @@ export class UsersService {
    * Sets a new password and ends all sessions of the user.
    *
    * @param id - Identifier of the user.
-   * @param dto - The new password.
+   * @param newPassword - The new password.
    * @returns A promise that resolves once the password is stored.
    * @throws NotFoundException if there is no such user.
    */
-  async resetPassword(id: string, dto: ResetPasswordDto): Promise<void> {
-    const passwordHash = await this.passwords.hash(dto.password)
+  async resetPassword(id: string, newPassword: ResetPasswordDto): Promise<void> {
+    const passwordHash = await this.passwords.hashPassword(newPassword.password)
     await this.prisma.$transaction(async (transaction) => {
-      this.assertFound(await this.users.lockById(id, transaction))
+      this.assertUserFound(await this.users.lockById(id, transaction))
       await this.users.update(id, { passwordHash }, transaction)
       await this.refreshTokens.revokeAllForUser(id, new Date(), transaction)
     })
@@ -174,7 +179,7 @@ export class UsersService {
    * @returns The user.
    * @throws NotFoundException if the lookup found nothing.
    */
-  private assertFound(user: User | null): User {
+  private assertUserFound(user: User | null): User {
     if (!user) {
       throw new NotFoundException('User not found')
     }
@@ -188,7 +193,7 @@ export class UsersService {
    * @returns A conflict for a duplicate e-mail address, otherwise the error itself.
    */
   private translateWriteError(error: unknown): unknown {
-    return isUniqueConstraintViolation(error)
+    return violatesUniqueConstraint(error)
       ? new ConflictException('A user with this e-mail address already exists')
       : error
   }

@@ -40,32 +40,38 @@ class SeedVariables {
  * @throws Error if a variable is missing or invalid.
  */
 function readSeedVariables(): SeedVariables {
-  const variables = plainToInstance(SeedVariables, process.env)
-  const errors = validateSync(variables, { validationError: { target: false, value: false } })
-  const rules = errors.flatMap((error) => Object.values(error.constraints ?? {}))
+  const seedVariables = plainToInstance(SeedVariables, process.env)
+  const validationErrors = validateSync(seedVariables, {
+    validationError: { target: false, value: false },
+  })
+  const failedRules = validationErrors.flatMap((validationError) =>
+    Object.values(validationError.constraints ?? {}),
+  )
   if (
-    errors.length === 0 &&
-    Buffer.byteLength(variables.SEED_ADMIN_PASSWORD) > MAX_PASSWORD_BYTES
+    validationErrors.length === 0 &&
+    Buffer.byteLength(seedVariables.SEED_ADMIN_PASSWORD) > MAX_PASSWORD_BYTES
   ) {
-    rules.push(`SEED_ADMIN_PASSWORD must be at most ${MAX_PASSWORD_BYTES.toString()} bytes long`)
+    failedRules.push(
+      `SEED_ADMIN_PASSWORD must be at most ${MAX_PASSWORD_BYTES.toString()} bytes long`,
+    )
   }
-  if (rules.length > 0) {
-    throw new Error(`Invalid seed configuration: ${rules.join('; ')}`)
+  if (failedRules.length > 0) {
+    throw new Error(`Invalid seed configuration: ${failedRules.join('; ')}`)
   }
-  return variables
+  return seedVariables
 }
 
 /**
  * Creates the first administrator unless an active administrator already exists.
  *
  * @param transaction - Client of the surrounding transaction.
- * @param variables - Validated seed variables.
+ * @param seedVariables - Validated seed variables.
  * @returns `true` if the administrator was created.
  * @throws Error if the e-mail address belongs to another account.
  */
 async function seedAdministrator(
   transaction: Prisma.TransactionClient,
-  variables: SeedVariables,
+  seedVariables: SeedVariables,
 ): Promise<boolean> {
   const activeAdministrators = await transaction.user.count({
     where: { role: Role.ADMIN, isActive: true },
@@ -73,15 +79,15 @@ async function seedAdministrator(
   if (activeAdministrators > 0) {
     return false
   }
-  const email = variables.SEED_ADMIN_EMAIL.toLowerCase()
-  if ((await transaction.user.count({ where: { email } })) > 0) {
+  const adminEmail = seedVariables.SEED_ADMIN_EMAIL.toLowerCase()
+  if ((await transaction.user.count({ where: { email: adminEmail } })) > 0) {
     throw new Error('SEED_ADMIN_EMAIL belongs to an account that is not an active administrator')
   }
   await transaction.user.create({
     data: {
-      email,
-      passwordHash: await hash(variables.SEED_ADMIN_PASSWORD, BCRYPT_COST),
-      fullName: variables.SEED_ADMIN_FULL_NAME,
+      email: adminEmail,
+      passwordHash: await hash(seedVariables.SEED_ADMIN_PASSWORD, BCRYPT_COST),
+      fullName: seedVariables.SEED_ADMIN_FULL_NAME,
       role: Role.ADMIN,
     },
   })
@@ -105,11 +111,11 @@ async function seedSystemSettings(transaction: Prisma.TransactionClient): Promis
 /**
  * Prints what happened to a seeded record, without any of its data.
  *
- * @param record - Name of the record.
- * @param created - Whether the record was created by this run.
+ * @param recordName - Name of the record.
+ * @param wasCreated - Whether the record was created by this run.
  */
-function report(record: string, created: boolean): void {
-  console.log(`${record}: ${created ? 'created' : 'already present'}`)
+function logSeedOutcome(recordName: string, wasCreated: boolean): void {
+  console.log(`${recordName}: ${wasCreated ? 'created' : 'already present'}`)
 }
 
 /**
@@ -118,24 +124,24 @@ function report(record: string, created: boolean): void {
  * @returns A promise that resolves once the seed has finished.
  * @throws Error if the configuration is invalid or the database rejects the data.
  */
-async function seed(): Promise<void> {
-  const variables = readSeedVariables()
+async function runSeed(): Promise<void> {
+  const seedVariables = readSeedVariables()
   const prisma = new PrismaClient({
-    adapter: new PrismaPg({ connectionString: variables.DATABASE_URL }),
+    adapter: new PrismaPg({ connectionString: seedVariables.DATABASE_URL }),
   })
   try {
-    const [administrator, settings] = await prisma.$transaction(async (transaction) => [
-      await seedAdministrator(transaction, variables),
+    const [adminCreated, settingsCreated] = await prisma.$transaction(async (transaction) => [
+      await seedAdministrator(transaction, seedVariables),
       await seedSystemSettings(transaction),
     ])
-    report('Administrator', administrator)
-    report('System settings', settings)
+    logSeedOutcome('Administrator', adminCreated)
+    logSeedOutcome('System settings', settingsCreated)
   } finally {
     await prisma.$disconnect()
   }
 }
 
-seed().catch((error: unknown) => {
+runSeed().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : 'Seeding failed')
   process.exitCode = 1
 })

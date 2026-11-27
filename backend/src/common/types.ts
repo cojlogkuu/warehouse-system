@@ -16,6 +16,16 @@ export interface AuthenticatedUser {
 }
 
 /**
+ * Data of the company that runs the warehouse, as printed on documents.
+ */
+export interface CompanyDetails {
+  /** Name of the company. */
+  name: string
+  /** Postal address. */
+  address: string
+}
+
+/**
  * HTTP request to which the authentication may have attached the user. Public routes have none.
  */
 export type AuthenticatedRequest = Request & { user?: AuthenticatedUser }

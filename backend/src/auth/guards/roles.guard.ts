@@ -24,14 +24,14 @@ export class RolesGuard implements CanActivate {
    * @returns `false` (answered with 403) if the route is restricted to other roles.
    */
   canActivate(context: ExecutionContext): boolean {
-    const roles = this.reflector.getAllAndOverride<Role[] | undefined>(ROLES_KEY, [
+    const allowedRoles = this.reflector.getAllAndOverride<Role[] | undefined>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
     ])
-    if (!roles) {
+    if (!allowedRoles) {
       return true
     }
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>()
-    return user !== undefined && roles.includes(user.role)
+    return user !== undefined && allowedRoles.includes(user.role)
   }
 }

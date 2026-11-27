@@ -11,7 +11,7 @@ const SWAGGER_PATH = `${API_PREFIX}/docs`
  * @param app - Application whose controllers are documented.
  */
 export function setupSwagger(app: INestApplication): void {
-  const options = new DocumentBuilder()
+  const documentOptions = new DocumentBuilder()
     .setTitle('Warehouse Inventory System API')
     .setDescription(
       'Log in, then paste the access token into "Authorize". The refresh token travels in an ' +
@@ -21,5 +21,5 @@ export function setupSwagger(app: INestApplication): void {
     .addBearerAuth()
     .addCookieAuth(REFRESH_COOKIE_NAME)
     .build()
-  SwaggerModule.setup(SWAGGER_PATH, app, () => SwaggerModule.createDocument(app, options))
+  SwaggerModule.setup(SWAGGER_PATH, app, () => SwaggerModule.createDocument(app, documentOptions))
 }
