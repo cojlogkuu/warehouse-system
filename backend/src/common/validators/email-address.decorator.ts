@@ -3,7 +3,8 @@ import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import { IsAscii, IsEmail, MaxLength } from 'class-validator'
 
-const MAX_EMAIL_LENGTH = 254
+/** Longest accepted e-mail address. */
+export const MAX_EMAIL_LENGTH = 254
 
 /**
  * Brings an e-mail address into the form in which it is stored and compared.
@@ -24,8 +25,8 @@ export function normalizeEmail(email: string): string {
 export function IsEmailAddress(): PropertyDecorator {
   return applyDecorators(
     ApiProperty({ format: 'email', maxLength: MAX_EMAIL_LENGTH }),
-    Transform(({ value }: { value: unknown }) =>
-      typeof value === 'string' ? normalizeEmail(value) : value,
+    Transform(({ value: rawEmail }: { value: unknown }) =>
+      typeof rawEmail === 'string' ? normalizeEmail(rawEmail) : rawEmail,
     ),
     IsAscii(),
     IsEmail(),

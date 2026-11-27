@@ -17,7 +17,7 @@ export class PasswordHasher implements OnModuleInit {
    * @returns A promise that resolves once the hash exists.
    */
   async onModuleInit(): Promise<void> {
-    this.decoyHash = await this.hash(randomBytes(32).toString('base64'))
+    this.decoyHash = await this.hashPassword(randomBytes(32).toString('base64'))
   }
 
   /**
@@ -26,7 +26,7 @@ export class PasswordHasher implements OnModuleInit {
    * @param password - Plain password.
    * @returns The bcrypt hash.
    */
-  hash(password: string): Promise<string> {
+  hashPassword(password: string): Promise<string> {
     return hash(password, BCRYPT_COST)
   }
 
@@ -38,8 +38,8 @@ export class PasswordHasher implements OnModuleInit {
    * @param passwordHash - Stored hash, if there is an account.
    * @returns `true` only if there is a hash and the password matches it.
    */
-  async verify(password: string, passwordHash: string | undefined): Promise<boolean> {
-    const matches = await compare(password, passwordHash ?? this.decoyHash)
-    return passwordHash !== undefined && matches
+  async verifyPassword(password: string, passwordHash: string | undefined): Promise<boolean> {
+    const passwordMatches = await compare(password, passwordHash ?? this.decoyHash)
+    return passwordHash !== undefined && passwordMatches
   }
 }

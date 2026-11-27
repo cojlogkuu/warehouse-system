@@ -13,8 +13,8 @@ import type { NextFunction, Request, Response } from 'express'
  * @param next - Continues the request, or receives the error answered with 415.
  */
 export function requireJsonBody(request: Request, _response: Response, next: NextFunction): void {
-  const { 'content-length': length, 'transfer-encoding': encoding } = request.headers
-  const hasContent = encoding !== undefined || Number(length ?? 0) > 0
+  const { 'content-length': contentLength, 'transfer-encoding': transferEncoding } = request.headers
+  const hasContent = transferEncoding !== undefined || Number(contentLength ?? 0) > 0
   if (hasContent && !request.is('application/json')) {
     next(new UnsupportedMediaTypeException('The request body must be application/json'))
     return

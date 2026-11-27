@@ -47,17 +47,17 @@ export class AuthController {
    * Creates the controller.
    *
    * @param auth - Authentication logic.
-   * @param cookie - Cookie of the refresh token.
+   * @param refreshCookie - Cookie of the refresh token.
    */
   constructor(
     private readonly auth: AuthService,
-    private readonly cookie: RefreshCookie,
+    private readonly refreshCookie: RefreshCookie,
   ) {}
 
   /**
    * Logs in: returns an access token and sets the refresh cookie.
    *
-   * @param dto - Credentials.
+   * @param credentials - Credentials.
    * @param response - Response that receives the cookie.
    * @returns The access token.
    */
@@ -70,10 +70,10 @@ export class AuthController {
   @ApiUnauthorizedResponse({ description: 'Wrong credentials or deactivated account' })
   @ApiTooManyRequestsResponse()
   async login(
-    @Body() dto: LoginDto,
+    @Body() credentials: LoginDto,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AccessTokenDto> {
-    return this.deliver(await this.auth.login(dto), response)
+    return this.deliverTokens(await this.auth.login(credentials), response)
   }
 
   /**
@@ -91,19 +91,19 @@ export class AuthController {
   @ApiCookieAuth()
   @ApiOkResponse({ type: AccessTokenDto })
   @ApiUnauthorizedResponse({ description: 'Missing, expired or revoked refresh token' })
-  async refresh(
+  async refreshSession(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AccessTokenDto> {
     try {
-      const token = this.cookie.read(request)
+      const token = this.refreshCookie.readToken(request)
       if (!token) {
         throw new UnauthorizedException(INVALID_REFRESH_TOKEN)
       }
-      return this.deliver(await this.auth.refresh(token), response)
+      return this.deliverTokens(await this.auth.refreshSession(token), response)
     } catch (error) {
       if (error instanceof UnauthorizedException) {
-        this.cookie.clear(response)
+        this.refreshCookie.clearToken(response)
       }
       throw error
     }
@@ -126,8 +126,8 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
-    await this.auth.logout(user.id, this.cookie.read(request) ?? '')
-    this.cookie.clear(response)
+    await this.auth.logout(user.id, this.refreshCookie.readToken(request) ?? '')
+    this.refreshCookie.clearToken(response)
   }
 
   /**
@@ -139,7 +139,7 @@ export class AuthController {
   @Get('me')
   @ApiBearerAuth()
   @ApiOkResponse({ type: ProfileDto })
-  me(@CurrentUser() user: AuthenticatedUser): ProfileDto {
+  showOwnProfile(@CurrentUser() user: AuthenticatedUser): ProfileDto {
     return Object.assign(new ProfileDto(), user)
   }
 
@@ -147,7 +147,7 @@ export class AuthController {
    * Changes the own password. All sessions end, so the client has to log in again.
    *
    * @param user - The authenticated user.
-   * @param dto - Current and new password.
+   * @param passwordChange - Current and new password.
    * @param response - Response that clears the cookie.
    * @returns A promise that resolves once the password is set.
    */
@@ -157,13 +157,13 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiNoContentResponse()
   @ApiTooManyRequestsResponse()
-  async changePassword(
+  async changeOwnPassword(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ChangePasswordDto,
+    @Body() passwordChange: ChangePasswordDto,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
-    await this.auth.changePassword(user.id, dto)
-    this.cookie.clear(response)
+    await this.auth.changePassword(user.id, passwordChange)
+    this.refreshCookie.clearToken(response)
   }
 
   /**
@@ -173,8 +173,8 @@ export class AuthController {
    * @param response - Response that receives the cookie.
    * @returns The body of the response.
    */
-  private deliver(tokens: AuthTokensDto, response: Response): AccessTokenDto {
-    this.cookie.write(response, tokens.refreshToken)
+  private deliverTokens(tokens: AuthTokensDto, response: Response): AccessTokenDto {
+    this.refreshCookie.writeToken(response, tokens.refreshToken)
     const { accessToken, expiresIn } = tokens
     return Object.assign(new AccessTokenDto(), { accessToken, expiresIn })
   }

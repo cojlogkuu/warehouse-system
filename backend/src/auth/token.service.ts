@@ -40,7 +40,7 @@ export class TokenService {
    * @param userId - Identifier of the user.
    * @returns The tokens with the hash and expiry of the refresh token.
    */
-  async issue(userId: string): Promise<IssuedSession> {
+  async issueTokens(userId: string): Promise<IssuedSession> {
     const issuedAt = Math.floor(Date.now() / 1000)
     const accessTtl = this.config.get('JWT_ACCESS_TTL_SECONDS', { infer: true })
     const refreshTtl = this.config.get('JWT_REFRESH_TTL_SECONDS', { infer: true })
@@ -67,7 +67,7 @@ export class TokenService {
         expiresIn: accessTtl,
         refreshToken,
       }),
-      refreshTokenHash: this.hash(refreshToken),
+      refreshTokenHash: this.hashToken(refreshToken),
       refreshExpiresAt: new Date((issuedAt + refreshTtl) * 1000),
     }
   }
@@ -97,7 +97,7 @@ export class TokenService {
    * @param token - Token to hash.
    * @returns The SHA-256 hash in hexadecimal form.
    */
-  hash(token: string): string {
+  hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex')
   }
 }

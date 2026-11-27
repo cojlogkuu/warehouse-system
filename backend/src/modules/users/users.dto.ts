@@ -9,12 +9,13 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator'
+import { IsBooleanQuery } from '../../common/validators'
 import { IsEmailAddress } from '../../common/validators/email-address.decorator'
 import { IsNewPassword } from '../../common/validators/password.decorator'
 import type { User } from '../../generated/prisma/client'
 import { Role } from '../../generated/prisma/enums'
 
-const MAX_FULL_NAME_LENGTH = 200
+const MAX_NAME_LENGTH = 200
 const MAX_SEARCH_LENGTH = 200
 
 /**
@@ -30,11 +31,13 @@ export class CreateUserDto {
   password: string
 
   /** Full name. */
-  @ApiProperty({ maxLength: MAX_FULL_NAME_LENGTH })
-  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
+  @ApiProperty({ maxLength: MAX_NAME_LENGTH })
+  @Transform(({ value: rawName }: { value: unknown }) =>
+    typeof rawName === 'string' ? rawName.trim() : rawName,
+  )
   @IsString()
   @IsNotEmpty()
-  @MaxLength(MAX_FULL_NAME_LENGTH)
+  @MaxLength(MAX_NAME_LENGTH)
   fullName: string
 
   /** Role of the user. */
@@ -52,7 +55,7 @@ export class UpdateUserDto extends PartialType(OmitType(CreateUserDto, ['passwor
 }) {
   /** `false` deactivates the account, `true` restores it. */
   @ApiPropertyOptional()
-  @ValidateIf((_dto, value) => value !== undefined)
+  @ValidateIf((_target, fieldValue) => fieldValue !== undefined)
   @IsBoolean()
   isActive?: boolean
 }
@@ -84,12 +87,7 @@ export class UserQueryDto {
   role?: Role
 
   /** Only active or only deactivated users. */
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Transform(({ value }: { value: unknown }) =>
-    value === 'true' ? true : value === 'false' ? false : value,
-  )
-  @IsBoolean()
+  @IsBooleanQuery()
   isActive?: boolean
 }
 
@@ -131,7 +129,7 @@ export class UserDto {
    * @param user - Stored user.
    * @returns The public data of that user.
    */
-  static from(user: User): UserDto {
+  static fromRecord(user: User): UserDto {
     return Object.assign(new UserDto(), {
       id: user.id,
       email: user.email,
