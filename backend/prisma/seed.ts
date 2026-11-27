@@ -2,12 +2,9 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { hash } from 'bcrypt'
 import { plainToInstance } from 'class-transformer'
 import { IsEmail, IsNotEmpty, IsString, IsUrl, MinLength, validateSync } from 'class-validator'
+import { BCRYPT_COST, MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH } from '../src/common/constants'
 import { Prisma, PrismaClient, Role } from '../src/generated/prisma/client'
 
-const BCRYPT_COST = 12
-const MIN_PASSWORD_LENGTH = 12
-/** bcrypt ignores everything after this number of bytes. */
-const MAX_PASSWORD_BYTES = 72
 const SETTINGS_ID = 1
 
 /**
